@@ -54,28 +54,18 @@ namespace Microsoft.Azure.Devices.Client
 
         public abstract void SafeClose(Exception exception);
 
-        public async Task<SendingAmqpLink> CreateSendingLinkAsync(string path, IotHubConnectionString connectionString,
-            TimeSpan timeout, CancellationToken cancellationToken)
+        public async Task<SendingAmqpLink> CreateSendingLinkAsync(
+            string path,
+            IotHubConnectionString connectionString,
+            AmqpLinkSettings linkSettings,
+            TimeSpan timeout, 
+            CancellationToken cancellationToken)
         {
             this.OnCreateSendingLink(connectionString);
 
             var timeoutHelper = new TimeoutHelper(timeout);
 
             AmqpSession session = await this.GetSessionAsync(timeoutHelper, cancellationToken);
-
-            var linkAddress = this.BuildLinkAddress(connectionString, path);
-
-            var linkSettings = new AmqpLinkSettings()
-            {
-                Role = false,
-                InitialDeliveryCount = 0,
-                Target = new Target() {Address = linkAddress.AbsoluteUri},
-                SndSettleMode = null, // SenderSettleMode.Unsettled (null as it is the default and to avoid bytes on the wire)
-                RcvSettleMode = null, // (byte)ReceiverSettleMode.First (null as it is the default and to avoid bytes on the wire)
-                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debugging
-            };
-
-            SetLinkSettingsCommonProperties(linkSettings, timeoutHelper.RemainingTime());
 
             var link = new SendingAmqpLink(linkSettings);
             link.AttachTo(session);
@@ -86,8 +76,12 @@ namespace Microsoft.Azure.Devices.Client
             return link;
         }
 
-        public async Task<ReceivingAmqpLink> CreateReceivingLinkAsync(string path,
-            IotHubConnectionString connectionString, TimeSpan timeout, uint prefetchCount,
+        public async Task<ReceivingAmqpLink> CreateReceivingLinkAsync(
+            string path,
+            IotHubConnectionString connectionString,
+            AmqpLinkSettings linkSettings,
+            TimeSpan timeout,
+            uint prefetchCount,
             CancellationToken cancellationToken)
         {
             this.OnCreateReceivingLink(connectionString);
@@ -96,95 +90,9 @@ namespace Microsoft.Azure.Devices.Client
 
             AmqpSession session = await this.GetSessionAsync(timeoutHelper, cancellationToken);
 
-            var linkAddress = this.BuildLinkAddress(connectionString, path);
-
-            var linkSettings = new AmqpLinkSettings()
-            {
-                Role = true,
-                TotalLinkCredit = prefetchCount,
-                AutoSendFlow = prefetchCount > 0,
-                Source = new Source() {Address = linkAddress.AbsoluteUri},
-                SndSettleMode = null, // SenderSettleMode.Unsettled (null as it is the default and to avoid bytes on the wire)
-                RcvSettleMode = (byte)ReceiverSettleMode.Second,
-                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debuggin
-            };
-
-            SetLinkSettingsCommonProperties(linkSettings, timeoutHelper.RemainingTime());
-
             var link = new ReceivingAmqpLink(linkSettings);
             link.AttachTo(session);
-
-            var audience = this.BuildAudience(connectionString, path);
-            await this.OpenLinkAsync(link, connectionString, audience, timeoutHelper.RemainingTime(), cancellationToken);
-
-            return link;
-        }
-
-        public async Task<SendingAmqpLink> CreateMethodSendingLinkAsync(string path,
-            IotHubConnectionString connectionString, TimeSpan timeout, CancellationToken cancellationToken,
-            string deviceId)
-        {
-            this.OnCreateSendingLink(connectionString);
-
-            var timeoutHelper = new TimeoutHelper(timeout);
-
-            AmqpSession session = await this.GetSessionAsync(timeoutHelper, cancellationToken);
-
-            var linkAddress = this.BuildLinkAddress(connectionString, path);
-
-            var linkSettings = new AmqpLinkSettings()
-            {
-                Role = false,
-                InitialDeliveryCount = 0,
-                Target = new Target() {Address = linkAddress.AbsoluteUri},
-                SndSettleMode = (byte)SenderSettleMode.Settled,
-                RcvSettleMode = (byte)ReceiverSettleMode.First,
-                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debugging
-            };
-
-            SetLinkSettingsCommonProperties(linkSettings, timeoutHelper.RemainingTime());
-            SetLinkSettingsCommonPropertiesForMethod(linkSettings, deviceId);
-
-            var link = new SendingAmqpLink(linkSettings);
-            link.AttachTo(session);
-
-            var audience = this.BuildAudience(connectionString, path);
-            await this.OpenLinkAsync(link, connectionString, audience, timeoutHelper.RemainingTime(), cancellationToken);
-
-            return link;
-        }
-
-        public async Task<ReceivingAmqpLink> CreateMethodReceivingLinkAsync(
-            string path, IotHubConnectionString connectionString, TimeSpan timeout, uint prefetchCount,
-            CancellationToken cancellationToken,
-            string deviceId, Action<AmqpMessage, ReceivingAmqpLink> messageListenerAction)
-        {
-            this.OnCreateReceivingLink(connectionString);
-
-            var timeoutHelper = new TimeoutHelper(timeout);
-
-            AmqpSession session = await this.GetSessionAsync(timeoutHelper, cancellationToken);
-            
-            var linkAddress = this.BuildLinkAddress(connectionString, path);
-
-            var linkSettings = new AmqpLinkSettings()
-            {
-                Role = true,
-                TotalLinkCredit = prefetchCount,
-                AutoSendFlow = prefetchCount > 0,
-                Source = new Source() { Address = linkAddress.AbsoluteUri },
-                SndSettleMode = (byte)SenderSettleMode.Settled,
-                RcvSettleMode = (byte)ReceiverSettleMode.First,
-                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debuggin
-            };
-
-            SetLinkSettingsCommonProperties(linkSettings, timeoutHelper.RemainingTime());
-            SetLinkSettingsCommonPropertiesForMethod(linkSettings, deviceId);
-
-            var link = new ReceivingAmqpLink(linkSettings);
-            link.AttachTo(session);
-            link.RegisterMessageListener(amqpMessage => messageListenerAction(amqpMessage, link));
-
+ 
             var audience = this.BuildAudience(connectionString, path);
             await this.OpenLinkAsync(link, connectionString, audience, timeoutHelper.RemainingTime(), cancellationToken);
 
@@ -225,7 +133,7 @@ namespace Microsoft.Azure.Devices.Client
 
         public abstract void Release(string deviceId);
 
-        protected abstract Uri BuildLinkAddress(IotHubConnectionString iotHubConnectionString, string path);
+        internal abstract Uri BuildLinkAddress(IotHubConnectionString iotHubConnectionString, string path);
 
         protected abstract string BuildAudience(IotHubConnectionString iotHubConnectionString, string path);
 
@@ -415,30 +323,6 @@ namespace Microsoft.Azure.Devices.Client
             amqpSettings.TransportProviders.Add(amqpTransportProvider);
 
             return amqpSettings;
-        }
-
-        protected static AmqpLinkSettings SetLinkSettingsCommonProperties(AmqpLinkSettings linkSettings, TimeSpan timeSpan)
-        {
-            linkSettings.AddProperty(IotHubAmqpProperty.TimeoutName, timeSpan.TotalMilliseconds);
-#if WINDOWS_UWP
-            // System.Reflection.Assembly.GetExecutingAssembly() does not exist for UWP, therefore use a hard-coded version name
-            // (This string is picked up by the bump_version script, so don't change the line below)
-            var UWPAssemblyVersion = "1.2.12";
-            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, UWPAssemblyVersion);
-#elif PCL
-            string PCLAssemblyVersion = "Microsoft.Azure.Devices.Client/1.2.12";
-            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, PCLAssemblyVersion);
-#else
-            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, Utils.GetClientVersion());
-#endif
-            return linkSettings;
-        }
-
-        protected static AmqpLinkSettings SetLinkSettingsCommonPropertiesForMethod(AmqpLinkSettings linkSettings, string deviceId)
-        {
-            linkSettings.AddProperty(IotHubAmqpProperty.ApiVersion, ClientApiVersionHelper.ApiVersionString);
-            linkSettings.AddProperty(IotHubAmqpProperty.ChannelCorrelationId, deviceId);
-            return linkSettings;
         }
 
         TlsTransportSettings CreateTlsTransportSettings()

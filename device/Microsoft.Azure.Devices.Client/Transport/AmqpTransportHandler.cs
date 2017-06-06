@@ -457,6 +457,29 @@ namespace Microsoft.Azure.Devices.Client.Transport
             }
         }
 
+        static AmqpLinkSettings SetLinkSettingsCommonProperties(AmqpLinkSettings linkSettings, TimeSpan timeSpan)
+        {
+            linkSettings.AddProperty(IotHubAmqpProperty.TimeoutName, timeSpan.TotalMilliseconds);
+#if WINDOWS_UWP
+            // System.Reflection.Assembly.GetExecutingAssembly() does not exist for UWP, therefore use a hard-coded version name
+            // (This string is picked up by the bump_version script, so don't change the line below)
+            var UWPAssemblyVersion = "1.2.12";
+            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, UWPAssemblyVersion);
+#elif PCL
+            string PCLAssemblyVersion = "Microsoft.Azure.Devices.Client/1.2.12";
+            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, PCLAssemblyVersion);
+#else
+            linkSettings.AddProperty(IotHubAmqpProperty.ClientVersion, Utils.GetClientVersion());
+#endif
+            return linkSettings;
+        }
+
+        static AmqpLinkSettings SetLinkSettingsCommonPropertiesForMethod(AmqpLinkSettings linkSettings, string deviceId)
+        {
+            linkSettings.AddProperty(IotHubAmqpProperty.ApiVersion, ClientApiVersionHelper.ApiVersionString);
+            linkSettings.AddProperty(IotHubAmqpProperty.ChannelCorrelationId, deviceId);
+            return linkSettings;
+        }
         async Task<SendingAmqpLink> GetEventSendingLinkAsync(CancellationToken cancellationToken)
         {
             SendingAmqpLink eventSendingLink;
@@ -471,7 +494,21 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceEventPathTemplate, System.Net.WebUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateSendingLinkAsync(path, this.iotHubConnectionString, timeout, cancellationToken);
+            var linkAddress = this.IotHubConnection.BuildLinkAddress(this.iotHubConnectionString, path);
+
+            var linkSettings = new AmqpLinkSettings()
+            {
+                Role = false,
+                InitialDeliveryCount = 0,
+                Target = new Target() {Address = linkAddress.AbsoluteUri},
+                SndSettleMode = null, // SenderSettleMode.Unsettled (null as it is the default and to avoid bytes on the wire)
+                RcvSettleMode = null, // (byte)ReceiverSettleMode.First (null as it is the default and to avoid bytes on the wire)
+                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debugging
+            };
+
+            SetLinkSettingsCommonProperties(linkSettings, timeout);
+
+            return await this.IotHubConnection.CreateSendingLinkAsync(path, this.iotHubConnectionString, linkSettings, timeout, cancellationToken);
         }
 
         async Task<ReceivingAmqpLink> GetDeviceBoundReceivingLinkAsync(CancellationToken cancellationToken)
@@ -489,7 +526,24 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceBoundPathTemplate, System.Net.WebUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateReceivingLinkAsync(path, this.iotHubConnectionString, timeout, this.prefetchCount, cancellationToken);
+            var linkAddress = this.IotHubConnection.BuildLinkAddress(this.iotHubConnectionString, path);
+
+            var linkSettings = new AmqpLinkSettings()
+            {
+                Role = true,
+                TotalLinkCredit = prefetchCount,
+                AutoSendFlow = prefetchCount > 0,
+                Source = new Source() {Address = linkAddress.AbsoluteUri},
+                SndSettleMode = null, // SenderSettleMode.Unsettled (null as it is the default and to avoid bytes on the wire)
+                RcvSettleMode = (byte)ReceiverSettleMode.Second,
+                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debuggin
+            };
+
+            var timeoutHelper = new TimeoutHelper(timeout);
+
+            SetLinkSettingsCommonProperties(linkSettings, timeoutHelper.RemainingTime());
+
+            return await this.IotHubConnection.CreateReceivingLinkAsync(path, this.iotHubConnectionString, linkSettings, timeout, this.prefetchCount, cancellationToken);
         }
 
         async Task<SendingAmqpLink> GetMethodSendingLinkAsync(CancellationToken cancellationToken)
@@ -506,7 +560,22 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceMethodPathTemplate, System.Net.WebUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateMethodSendingLinkAsync(path, this.iotHubConnectionString, timeout, cancellationToken, this.deviceId);
+            var linkAddress = this.IotHubConnection.BuildLinkAddress(this.iotHubConnectionString, path);
+
+            var linkSettings = new AmqpLinkSettings()
+            {
+                Role = false,
+                InitialDeliveryCount = 0,
+                Target = new Target() {Address = linkAddress.AbsoluteUri},
+                SndSettleMode = (byte)SenderSettleMode.Settled,
+                RcvSettleMode = (byte)ReceiverSettleMode.First,
+                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debugging
+            };
+
+            SetLinkSettingsCommonProperties(linkSettings, timeout);
+            SetLinkSettingsCommonPropertiesForMethod(linkSettings, this.deviceId);
+
+            return await this.IotHubConnection.CreateSendingLinkAsync(path, this.iotHubConnectionString, linkSettings, timeout, cancellationToken);
         }
 
         async Task<ReceivingAmqpLink> GetMethodReceivingLinkAsync(CancellationToken cancellationToken)
@@ -524,14 +593,33 @@ namespace Microsoft.Azure.Devices.Client.Transport
         {
             string path = string.Format(CultureInfo.InvariantCulture, CommonConstants.DeviceMethodPathTemplate, System.Net.WebUtility.UrlEncode(this.deviceId));
 
-            return await this.IotHubConnection.CreateMethodReceivingLinkAsync(
-                path, this.iotHubConnectionString, timeout, this.prefetchCount, cancellationToken, this.deviceId,
-                (amqpMessage, methodReceivingLink) =>
+            var linkAddress = this.IotHubConnection.BuildLinkAddress(this.iotHubConnectionString, path);
+
+            var linkSettings = new AmqpLinkSettings()
+            {
+                Role = true,
+                TotalLinkCredit = prefetchCount,
+                AutoSendFlow = prefetchCount > 0,
+                Source = new Source() { Address = linkAddress.AbsoluteUri },
+                SndSettleMode = (byte)SenderSettleMode.Settled,
+                RcvSettleMode = (byte)ReceiverSettleMode.First,
+                LinkName = Guid.NewGuid().ToString("N") // Use a human readable link name to help with debuggin
+            };
+
+            SetLinkSettingsCommonProperties(linkSettings, timeout);
+            SetLinkSettingsCommonPropertiesForMethod(linkSettings, deviceId);
+
+            var link = await this.IotHubConnection.CreateReceivingLinkAsync(
+                path, this.iotHubConnectionString, linkSettings, timeout, this.prefetchCount, cancellationToken);
+
+            link.RegisterMessageListener(amqpMessage => 
                 {
                     MethodRequestInternal methodRequestInternal = MethodConverter.ConstructMethodRequestFromAmqpMessage(amqpMessage);
-                    methodReceivingLink.DisposeDelivery(amqpMessage, true, AmqpConstants.AcceptedOutcome);
+                    link.DisposeDelivery(amqpMessage, true, AmqpConstants.AcceptedOutcome);
                     this.messageListener(methodRequestInternal);
                 });
+
+            return link;
         }
     }
 }

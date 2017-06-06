@@ -83,7 +83,7 @@ namespace Microsoft.Azure.Devices.Client
             return amqpSession;
         }
 
-        protected override Uri BuildLinkAddress(IotHubConnectionString doNotUse, string path)
+        internal override Uri BuildLinkAddress(IotHubConnectionString doNotUse, string path)
         {
             return this.ConnectionString.BuildLinkAddress(path);
         }
