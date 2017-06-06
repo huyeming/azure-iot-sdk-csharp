@@ -78,7 +78,7 @@ namespace Microsoft.Azure.Devices.Client
             }
         }
 
-        protected override Uri BuildLinkAddress(IotHubConnectionString iotHubConnectionString, string path)
+        internal override Uri BuildLinkAddress(IotHubConnectionString iotHubConnectionString, string path)
         {
             return iotHubConnectionString.BuildLinkAddress(path);
         }
