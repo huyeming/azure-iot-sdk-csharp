@@ -463,7 +463,7 @@ namespace Microsoft.Azure.Devices.E2ETests
             while (true)
             {
                 // Receive the file notification from queue
-                fileNotification = await fileNotificationReceiver.ReceiveAsync(TimeSpan.FromSeconds(20));
+                fileNotification = await fileNotificationReceiver.ReceiveAsync(TimeSpan.FromSeconds(60));
                 Assert.IsNotNull(fileNotification);
                 await fileNotificationReceiver.CompleteAsync(fileNotification);
                 if (deviceInfo.Item1 == fileNotification.DeviceId)
